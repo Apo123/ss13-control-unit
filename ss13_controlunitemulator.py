@@ -1,4 +1,6 @@
 """
+    See http://www.brouhaha.com/~eric/retrocomputing/motorola/mc14500b/
+
  *	 Instructions: Word size in this setup is one byte, one nibble is the instruction and the other is the operand. In that order. A0 is opcode A operand 0.
  *	 0 and F are NOPs
  *	 1 (LD) loads an input value into the accumulator, RR
@@ -46,7 +48,13 @@ class ControlUnitEmulator():
         for i in range(1, 8):
             self.outputpins[i] = 0
         # The program itself
-        self.program = program
+        # Extend the program to 32 bytes of data since that is what is processed
+        # per game tick. The game does this by repeating the given program until
+        # it fills the input buffer
+        if (len(program) < 64):
+            self.program = program * (64 / len(program))
+            self.program += program[:(64 % len(program))]
+        print self.program
         # How far we are into the program
         self.progoffset = 0
 
@@ -64,23 +72,24 @@ class ControlUnitEmulator():
         for i in range(4, 8):
             print str(i) + ": " + hex(self.rammap[i]),
         print "\nInput: "
-        for i in range(0, 4):
-            print str(i) + ": " + hex(self.inputpins[i]),
+        for i in range(1, 4):
+            print str(i) + ": " + hex(self.inputpins[i] & self.ien),
         print ""
         for i in range(4, 8):
-            print str(i) + ": " + hex(self.inputpins[i]),
+            print str(i) + ": " + hex(self.inputpins[i] & self.ien),
         print "\nOutput: "
         for i in range(1, 4):
-            print str(i) + ": " + hex(self.outputpins[i]),
+            print str(i) + ": " + hex(self.outputpins[i] & self.oen),
         print ""
         for i in range(4, 8):
-            print str(i) + ": " + hex(self.outputpins[i]),
+            print str(i) + ": " + hex(self.outputpins[i] & self.oen),
         print "\n"
 
     def singleStep(self):
         print "Handling: " + self.program[self.progoffset:self.progoffset+2]
         opcode, operand = self.readOpcode()
         self.handleOpcode(opcode, operand)
+        self.inputpins[0] = self.rr ^ 0x1
         if self.progoffset != len(self.program):
             return True
         else:
@@ -96,49 +105,49 @@ class ControlUnitEmulator():
         if opcode == INSTR_NOP:
             return
         elif opcode == INSTR_LD:
-            # If the operand is 8 or more, we fetch from RAM
+            # If the operand is 8 or more, we fetch from RAM (?)
             if operand & 0x8:
                 operand -= 8
-                self.rr = self.rammap[operand]
+                self.rr = (self.rammap[operand] & self.ien)
             else:
-                self.rr = self.inputpins[operand]
+                self.rr = (self.inputpins[operand] & self.ien)
         elif opcode == INSTR_LDC:
             if operand & 0x8:
                 operand -= 8
-                self.rr = self.rammap[operand] ^ 0x1
+                self.rr = (self.rammap[operand] & self.ien) ^ 0x1
             else:
-                self.rr = self.inputpins[operand] ^ 0x1
+                self.rr = (self.inputpins[operand] & self.ien) ^ 0x1
         elif opcode == INSTR_AND:
             if operand & 0x8:
                 operand -= 8
-                self.rr = self.rr & self.rammap[operand]
+                self.rr = self.rr & (self.rammap[operand] & self.ien)
             else:
-                self.rr = self.rr & self.inputpins[operand]
+                self.rr = self.rr & (self.inputpins[operand] & self.ien)
         elif opcode == INSTR_ANDC:
             if operand & 0x8:
                 operand -= 8
-                self.rr = self.rr & self.rammap[operand] ^ 0x1
+                self.rr = self.rr & ((self.rammap[operand] & self.ien) ^ 0x1)
             else:
-                self.rr = self.rr & self.inputpins[operand] ^ 0x1
+                self.rr = self.rr & ((self.inputpins[operand] & self.ien) ^ 0x1)
         elif opcode == INSTR_OR:
             if operand & 0x8:
                 operand -= 8
-                self.rr = self.rr | self.rammap[operand]
+                self.rr = self.rr | (self.rammap[operand] & self.ien)
             else:
-                self.rr = self.rr | self.inputpins[operand]
+                self.rr = self.rr | (self.inputpins[operand] & self.ien)
         elif opcode == INSTR_ORC:
             if operand & 0x8:
                 operand -= 8
-                self.rr = self.rr | self.rammap[operand] ^ 0x1
+                self.rr = self.rr | ((self.rammap[operand] & self.ien) ^ 0x1)
             else:
-                self.rr = self.rr | self.inputpins[operand] ^ 0x1
+                self.rr = self.rr | ((self.inputpins[operand] & self.ien) ^ 0x1)
         elif opcode == INSTR_XNOR:
             # This is the python way of saying rr = (rr == operand ? 1 : 0)
             if operand & 0x8:
                 operand -= 8
-                self.rr = (self.rr == self.rammap[operand] and 1 or 0)
+                self.rr = ((self.rr == (self.rammap[operand] & self.ien)) and 1 or 0)
             else:
-                self.rr = (self.rr == self.inputpins[operand] and 1 or 0)
+                self.rr = ((self.rr == (self.inputpins[operand] & self.ien)) and 1 or 0)
         elif opcode == INSTR_STO:
             # If the operand is 8 or more, we store rr in RAM
             if operand & 0x8:
@@ -157,9 +166,15 @@ class ControlUnitEmulator():
                 self.outputpins[operand] = self.rr ^ 0x1
         # Not sure if these are correct
         elif opcode == INSTR_IEN:
-            self.ien = operand
+            if operand & 0x8:
+                self.ien = self.rammap[operand]
+            else:
+                self.ien = self.inputpins[operand]
         elif opcode == INSTR_OEN:
-            self.oen = operand
+            if operand & 0x8:
+                self.oen = self.rammap[operand]
+            else:
+                self.oen = self.inputpins[operand]
         elif opcode == INSTR_JMP:
             if operand & 0x8:
                 operand -= 7

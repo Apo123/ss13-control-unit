@@ -188,5 +188,11 @@ class ControlUnitAssembler():
 
 if __name__ == "__main__":
     prog = ControlUnitAssembler(False)
-    p = prog.assembleFile("ss13_controlunit_testing.asm")
+    #p = prog.assembleFile("ss13_controlunit_reset.asm")
+    #p = prog.assembleFile("ss13_controlunit_testing.asm")
+    #p = prog.assembleFile("ss13_controlunit_inputadd1.asm")
+    #p = prog.assembleFile("ss13_controlunit_nor.asm")
+    p = prog.assembleFile("ss13_controlunit_lfsr_3bit.txt")
     print p
+    if len(p) < 64:
+        print p + (((64 - len(p)) / 2) * "00")
